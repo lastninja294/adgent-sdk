@@ -1,0 +1,51 @@
+{
+  "name": "adgent-sdk",
+  "version": "0.1.0",
+  "description": "Lightweight, framework-agnostic VAST Player SDK for Smart TV platforms",
+  "type": "module",
+  "main": "./dist/adgent-sdk.umd.js",
+  "module": "./dist/adgent-sdk.es.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/adgent-sdk.es.js",
+      "require": "./dist/adgent-sdk.umd.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "keywords": [
+    "vast",
+    "video-ads",
+    "smart-tv",
+    "webos",
+    "tizen",
+    "vidaa",
+    "sdk"
+  ],
+  "author": "",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "fast-xml-parser": "^4.3.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@vitest/coverage-v8": "^1.2.0",
+    "happy-dom": "^13.3.1",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.12",
+    "vite-plugin-dts": "^3.7.1",
+    "vitest": "^1.2.0"
+  }
+}
