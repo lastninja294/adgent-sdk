@@ -54,38 +54,7 @@ const WRAPPER_VAST = `<?xml version="1.0" encoding="UTF-8"?>
   </Ad>
 </VAST>`;
 
-// Test fixture for future use
-const _MULTIPLE_MEDIA_FILES_VAST = `<?xml version="1.0" encoding="UTF-8"?>
-<VAST version="4.0">
-  <Ad id="12345">
-    <InLine>
-      <AdSystem>Test</AdSystem>
-      <AdTitle>Multi-bitrate Ad</AdTitle>
-      <Impression>https://example.com/imp</Impression>
-      <Creatives>
-        <Creative>
-          <Linear>
-            <Duration>00:00:30</Duration>
-            <MediaFiles>
-              <MediaFile delivery="progressive" type="video/mp4" width="3840" height="2160" bitrate="8000">
-                https://example.com/4k.mp4
-              </MediaFile>
-              <MediaFile delivery="progressive" type="video/mp4" width="1920" height="1080" bitrate="2500">
-                https://example.com/1080p.mp4
-              </MediaFile>
-              <MediaFile delivery="progressive" type="video/mp4" width="1280" height="720" bitrate="1500">
-                https://example.com/720p.mp4
-              </MediaFile>
-              <MediaFile delivery="progressive" type="video/webm" width="1920" height="1080" bitrate="2500">
-                https://example.com/1080p.webm
-              </MediaFile>
-            </MediaFiles>
-          </Linear>
-        </Creative>
-      </Creatives>
-    </InLine>
-  </Ad>
-</VAST>`;
+
 
 const EMPTY_VAST = `<?xml version="1.0" encoding="UTF-8"?>
 <VAST version="4.0">

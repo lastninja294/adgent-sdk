@@ -54,6 +54,11 @@ export class AdPlayer {
 
   constructor(config: AdPlayerConfig) {
     this.config = { ...DEFAULT_CONFIG, ...config } as Required<AdPlayerConfig>;
+    
+    if (!this.config.container) {
+      throw new Error('Container element is required');
+    }
+
     this.platform = getPlatformAdapter();
     this.parser = new VASTParser({
       maxWrapperDepth: this.config.maxWrapperDepth,
@@ -82,6 +87,10 @@ export class AdPlayer {
    * Initialize the SDK: fetch VAST, create video element, attempt autoplay
    */
   async init(): Promise<void> {
+    if (!this.config.container) {
+      throw new Error('Container element not found');
+    }
+
     this.updateState({ status: PlaybackStatus.Loading });
 
     try {
