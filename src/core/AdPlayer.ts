@@ -55,9 +55,7 @@ export class AdPlayer {
   constructor(config: AdPlayerConfig) {
     this.config = { ...DEFAULT_CONFIG, ...config } as Required<AdPlayerConfig>;
     
-    if (!this.config.container) {
-      throw new Error('Container element is required');
-    }
+
 
     this.platform = getPlatformAdapter();
     this.parser = new VASTParser({
