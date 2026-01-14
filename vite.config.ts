@@ -9,7 +9,11 @@ export default defineConfig({
       rollupTypes: true,
     }),
   ],
+  esbuild: {
+    target: 'chrome68',
+  },
   build: {
+    target: 'chrome68',
     lib: {
       entry: resolve(__dirname, 'src/index.ts'),
       name: 'AdgentSDK',
