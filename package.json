@@ -1,6 +1,6 @@
 {
   "name": "adgent-sdk",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Lightweight, framework-agnostic VAST Player SDK for Smart TV platforms",
   "type": "module",
   "main": "./dist/adgent-sdk.umd.js",
