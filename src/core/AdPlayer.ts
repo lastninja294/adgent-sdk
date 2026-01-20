@@ -49,6 +49,7 @@ export class AdPlayer {
   private state: AdPlayerState;
   private ads: Ad[] = [];
   private listeners: Set<AdPlayerEventListener> = new Set();
+  private eventListeners = new Map<string, EventListener>();
   private quartilesFired: Set<number> = new Set();
   private boundKeyHandler: ((e: KeyboardEvent) => void) | null = null;
   private focusTrap: HTMLElement | null = null;
@@ -239,6 +240,19 @@ export class AdPlayer {
     this.config.container.appendChild(video);
     this.videoElement = video;
 
+    if (this.config.debug) {
+      const events = ['loadstart', 'loadeddata', 'canplay', 'waiting', 'playing'];
+      events.forEach(event => {
+        const listener = () => this.log(`Video ${event}`);
+        video.addEventListener(event, listener);
+        this.eventListeners.set(event, listener);
+      });
+      
+      const onPlay = () => this.log("Video play event");
+      video.addEventListener("play", onPlay);
+      this.eventListeners.set("play", onPlay);
+    }
+
     this.log(`Video element created with src: ${mediaFile.url}`);
   }
 
@@ -253,6 +267,7 @@ export class AdPlayer {
       await this.videoElement.play();
       this.handlePlaybackStart();
     } catch (error) {
+      console.error('[Adgent] Autoplay failed details:', error);
       // Soft-fail: show "Start Ad" overlay instead of crashing
       this.log(`Autoplay failed: ${error}`);
       this.showStartOverlay();
@@ -628,7 +643,16 @@ export class AdPlayer {
         break;
 
       case KeyAction.Back:
-        this.log('Back pressed - ignoring during ad');
+        if (this.config.onClose) {
+          this.log('Back pressed - user cancelling');
+          this.config.onClose();
+          this.destroy();
+        } else {
+          this.log('Back pressed - skipping');
+          this.emit({ type: 'skip' });
+          if (this.config.onSkip) this.config.onSkip();
+          this.destroy();
+        }
         break;
 
       case KeyAction.Play:
@@ -695,7 +719,13 @@ export class AdPlayer {
       this.boundKeyHandler = null;
     }
 
-    this.videoElement?.remove();
+    if (this.videoElement) {
+      this.eventListeners.forEach((listener, event) => {
+        this.videoElement?.removeEventListener(event, listener);
+      });
+      this.eventListeners.clear();
+      this.videoElement.remove();
+    }
     this.overlayElement?.remove();
     this.skipButtonElement?.remove();
     this.progressElement?.remove();

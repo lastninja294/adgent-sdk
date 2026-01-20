@@ -57,6 +57,9 @@ export interface AdPlayerConfig {
   
   /** Custom "Start Ad" overlay UI (for autoplay fallback) */
   customStartOverlay?: HTMLElement;
+
+  /** Callback key-action Back or Exit */
+  onClose?: () => void;
 }
 
 /** Current player state */
