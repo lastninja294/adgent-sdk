@@ -43,6 +43,7 @@ export class AdPlayer {
   private videoElement: HTMLVideoElement | null = null;
   private overlayElement: HTMLElement | null = null;
   private skipButtonElement: HTMLElement | null = null;
+  private progressElement: HTMLElement | null = null;
   private tracker: AdTracker | null = null;
   
   private state: AdPlayerState;
@@ -179,7 +180,16 @@ export class AdPlayer {
       }
     });
 
-    video.src = mediaFile.url;
+    video.removeAttribute('src'); 
+    video.innerHTML = '';
+    
+    const source = document.createElement('source');
+    source.src = mediaFile.url;
+    source.type = mediaFile.type || 'video/mp4'; 
+    video.appendChild(source);
+
+    // WebOS often requires CORS for CDN content
+    video.setAttribute('crossorigin', 'anonymous');
     video.style.cssText = `
       width: 100%;
       height: 100%;
@@ -269,24 +279,28 @@ export class AdPlayer {
         left: 0;
         width: 100%;
         height: 100%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: rgba(0, 0, 0, 0.7);
+        display: table;
+        background: rgba(0, 0, 0, 0.5);
         z-index: 100;
       ">
-        <button id="adgent-start-btn" style="
-          padding: 20px 40px;
-          font-size: 24px;
-          background: #fff;
-          color: #000;
-          border: none;
-          border-radius: 8px;
-          cursor: pointer;
-          font-weight: bold;
-        ">
-          ▶ Start Ad
-        </button>
+        <div style="display: table-cell; vertical-align: middle; text-align: center;">
+          <button id="adgent-start-btn" style="
+            width: 80px;
+            height: 80px;
+            background: rgba(0, 0, 0, 0.7);
+            border: 3px solid #fff;
+            border-radius: 50%;
+            cursor: pointer;
+            display: inline-block;
+            line-height: 80px;
+            text-align: center;
+            color: #fff;
+            font-size: 40px;
+            padding: 0 0 0 8px; /* Optical center for triangle */
+          ">
+            ▶
+          </button>
+        </div>
       </div>
     `;
     overlay.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%;';
@@ -346,6 +360,7 @@ export class AdPlayer {
     this.tracker?.track('creativeView');
 
     this.setupSkipButton();
+    this.setupProgressUI();
 
     this.log('Playback started');
   }
@@ -370,6 +385,8 @@ export class AdPlayer {
     this.updateSkipCountdown(currentTime);
 
     this.tracker?.updateMacroContext({ adPlayhead: currentTime });
+    
+    this.updateProgressUI(currentTime, duration);
 
     const progress: AdProgress = {
       currentTime,
@@ -466,6 +483,7 @@ export class AdPlayer {
       this.updateState({ canSkip: true });
       this.skipButtonElement.textContent = this.config.skipButtonText;
       this.skipButtonElement.style.opacity = '1';
+      this.skipButtonElement.focus(); // Auto-focus when available
     } else if (remaining > 0) {
       this.skipButtonElement.textContent = `Skip in ${Math.ceil(remaining)}s`;
       this.skipButtonElement.style.opacity = '0.6';
@@ -543,6 +561,55 @@ export class AdPlayer {
     };
 
     document.addEventListener('keydown', this.boundKeyHandler, true);
+  }
+
+  /**
+   * Set up progress UI in top-left
+   */
+  private setupProgressUI(): void {
+    const container = document.createElement('div');
+    container.style.cssText = `
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      background: rgba(0, 0, 0, 0.7);
+      color: #fff;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 14px;
+      font-family: sans-serif;
+      z-index: 101;
+      display: block;
+      white-space: nowrap;
+    `;
+    
+    // Initial content
+    container.innerHTML = `
+      <span style="display: inline-block; vertical-align: middle; margin-right: 8px; background: #f4b400; color: #000; padding: 2px 4px; border-radius: 2px; font-weight: bold; font-size: 12px;">Ad</span>
+      <span id="adgent-progress-text" style="display: inline-block; vertical-align: middle;">1 of ${this.ads.length} • 0:00</span>
+    `;
+
+    this.config.container.appendChild(container);
+    this.progressElement = container;
+  }
+
+  /**
+   * Update progress UI text
+   */
+  private updateProgressUI(currentTime: number, duration: number): void {
+    if (!this.progressElement) return;
+
+    const remaining = Math.ceil(duration - currentTime);
+    const minutes = Math.floor(remaining / 60);
+    const seconds = remaining % 60;
+    const timeText = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    
+    const textEl = this.progressElement.querySelector('#adgent-progress-text');
+    if (textEl) {
+      // Assuming single linear ad for now, can be expanded for pods
+      const currentAdIndex = 1; 
+      textEl.textContent = `${currentAdIndex} of ${this.ads.length} • ${timeText}`;
+    }
   }
 
   /**
@@ -631,11 +698,13 @@ export class AdPlayer {
     this.videoElement?.remove();
     this.overlayElement?.remove();
     this.skipButtonElement?.remove();
+    this.progressElement?.remove();
     this.focusTrap?.remove();
 
     this.videoElement = null;
     this.overlayElement = null;
     this.skipButtonElement = null;
+    this.progressElement = null;
     this.focusTrap = null;
 
     this.tracker?.reset();
@@ -683,7 +752,7 @@ export class AdPlayer {
    */
   private log(message: string): void {
     if (this.config.debug) {
-      console.log(`[AdPlayer] ${message}`);
+      this.platform.debug(message);
     }
   }
 }

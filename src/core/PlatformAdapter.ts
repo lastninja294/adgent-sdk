@@ -398,6 +398,28 @@ export class PlatformAdapter implements IPlatformAdapter {
         };
     }
   }
+  /**
+   * Show debug message using platform-specific native notifications
+   * Falls back to console.log
+   */
+  debug(message: string): void {
+    console.log(`[Adgent] ${message}`);
+
+    if (this.platform === Platform.WebOS && typeof window !== 'undefined') {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const win = window as any;
+      if (win.webOS && win.webOS.service) {
+        win.webOS.service.request('luna://com.webos.notification', {
+          method: 'createToast',
+          parameters: {
+            message: `[Adgent] ${message}`
+          },
+          onSuccess: () => {},
+          onFailure: () => {}
+        });
+      }
+    }
+  }
 }
 
 // Singleton instance
