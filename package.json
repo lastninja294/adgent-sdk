@@ -1,6 +1,6 @@
 {
   "name": "adgent-sdk",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Lightweight, framework-agnostic VAST Player SDK for Smart TV platforms",
   "type": "module",
   "main": "./dist/adgent-sdk.umd.js",
@@ -40,9 +40,13 @@
     "fast-xml-parser": "^4.3.4"
   },
   "devDependencies": {
+    "@babel/core": "^7.28.6",
+    "@babel/preset-env": "^7.28.6",
+    "@rollup/plugin-babel": "^6.1.0",
     "@types/node": "^20.11.0",
     "@vitest/coverage-v8": "^1.2.0",
     "happy-dom": "^13.3.1",
+    "terser": "^5.46.0",
     "typescript": "^5.3.3",
     "vite": "^5.0.12",
     "vite-plugin-dts": "^3.7.1",

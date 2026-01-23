@@ -2,6 +2,8 @@ import { defineConfig } from 'vite';
 import { resolve } from 'path';
 import dts from 'vite-plugin-dts';
 
+import { babel } from '@rollup/plugin-babel';
+
 export default defineConfig({
   plugins: [
     dts({
@@ -10,10 +12,10 @@ export default defineConfig({
     }),
   ],
   esbuild: {
-    target: 'chrome68',
+    target: 'es2015',
   },
   build: {
-    target: 'chrome68',
+    target: 'es2015',
     lib: {
       entry: resolve(__dirname, 'src/index.ts'),
       name: 'AdgentSDK',
@@ -28,9 +30,16 @@ export default defineConfig({
           'fast-xml-parser': 'FastXMLParser',
         },
       },
+      plugins: [
+        babel({
+          babelHelpers: 'bundled',
+          presets: ['@babel/preset-env'],
+          extensions: ['.js', '.ts'],
+        }),
+      ],
     },
-    // Target smaller bundle size (esbuild is bundled with Vite)
-    minify: 'esbuild',
+    // Target smaller bundle size (terser is better for ES5)
+    minify: 'terser',
   },
   resolve: {
     alias: {
