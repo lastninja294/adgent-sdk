@@ -120,10 +120,17 @@ export interface IPlatformAdapter {
   getKeyCodesForAction(action: KeyAction): number[];
   
   /**
+  /**
    * Check if a specific codec is supported
    * @param codec - MIME type with codec (e.g., 'video/mp4; codecs="hvc1"')
    */
   isCodecSupported(codec: string): boolean;
+
+  /**
+   * Open an external link in a new tab/window
+   * @param url - The URL to open
+   */
+  openExternalLink(url: string): void;
 }
 
 /** Default key codes (varies by platform) */

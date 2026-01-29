@@ -254,6 +254,12 @@ export class AdPlayer {
     }
 
     this.log(`Video element created with src: ${mediaFile.url}`);
+
+    video.addEventListener('click', () => {
+      this.onAdClick();
+    });
+    
+    video.style.cursor = 'pointer';
   }
 
   /**
@@ -328,6 +334,42 @@ export class AdPlayer {
     this.overlayElement = overlay;
 
     (button as HTMLElement)?.focus();
+  }
+
+  /**
+   * Handle ad click (video element click)
+   */
+  private onAdClick(): void {
+    if (this.state.status !== PlaybackStatus.Playing) return;
+
+    const linear = this.getFirstLinearCreative();
+    if (!linear) return;
+
+    // Get ClickThrough URL
+    const clickThrough = linear.videoClicks?.clickThrough;
+    // According to types/vast.ts, ClickThrough is an object with a url property
+    const url = clickThrough?.url;
+
+    if (url) {
+      this.log(`Ad clicked. Opening: ${url}`);
+      
+      // Pause playback
+      this.videoElement?.pause();
+      
+      // Fire tracking pixels
+      const clickTracking = linear.videoClicks?.clickTracking || [];
+      
+      clickTracking.forEach(tracking => {
+        if (tracking.url) this.tracker?.firePixel(tracking.url);
+      });
+
+      // Open URL
+      this.platform.openExternalLink(url);
+      
+      // Emit event
+      this.emit({ type: 'click', data: { url } });
+      this.config.onClick?.(url);
+    }
   }
 
   /**

@@ -115,7 +115,8 @@ describe('AdPlayer Integration', () => {
       await player.init();
 
       const video = container.querySelector('video');
-      expect(video?.src).toContain('video.mp4');
+      const source = video?.querySelector('source');
+      expect(source?.src).toContain('video.mp4');
     });
 
     it('should fire impression pixels on start', async () => {
@@ -439,7 +440,7 @@ describe('AdPlayer Integration', () => {
       await player.init();
 
       expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('[AdPlayer]')
+        expect.stringContaining('[Adgent]')
       );
     });
   });

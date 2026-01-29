@@ -398,6 +398,32 @@ export class PlatformAdapter implements IPlatformAdapter {
         };
     }
   }
+
+  /**
+   * Open an external link in a new tab/window
+   * Safe to call on all platforms (will just log on non-web)
+   */
+  openExternalLink(url: string): void {
+    if (typeof window === 'undefined') {
+      this.debug(`[Adgent] Cannot open link (server-side): ${url}`);
+      return;
+    }
+
+    if (this.platform !== Platform.Generic && this.platform !== Platform.Tizen && this.platform !== Platform.WebOS) {
+          // Most Smart TV platforms don't support opening browsers from apps
+          this.debug(`[Adgent] Opening external links not supported on ${this.platform}: ${url}`);
+          return;
+    }
+
+    try {
+      const win = window as any;
+      win.open(url, '_blank');
+      this.debug(`[Adgent] Opened external link: ${url}`);
+    } catch (error) {
+      this.debug(`[Adgent] Failed to open external link: ${error}`);
+    }
+  }
+
   /**
    * Show debug message using platform-specific native notifications
    * Falls back to console.log

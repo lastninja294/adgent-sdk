@@ -1,6 +1,6 @@
 {
   "name": "adgent-sdk",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Lightweight, framework-agnostic VAST Player SDK for Smart TV platforms",
   "type": "module",
   "main": "./dist/adgent-sdk.umd.js",
@@ -34,8 +34,8 @@
     "vidaa",
     "sdk"
   ],
-  "author": "",
-  "license": "UNLICENSED",
+  "author": "Asadbek Omonboyev",
+  "license": "MIT",
   "dependencies": {
     "fast-xml-parser": "^4.3.4"
   },
