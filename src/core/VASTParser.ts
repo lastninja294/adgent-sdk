@@ -428,12 +428,19 @@ export class VASTParser {
   ): MediaFile | null {
     if (mediaFiles.length === 0) return null;
 
+    // Filter to supported video MIME types (exclude VPAID/JS)
+    const validFiles = mediaFiles.filter(mf => 
+      mf.type.toLowerCase().startsWith('video/')
+    );
+
+    if (validFiles.length === 0) return null;
+
     // Filter to MP4 only for maximum compatibility
-    const mp4Files = mediaFiles.filter(
+    const mp4Files = validFiles.filter(
       (mf) => mf.type.includes('mp4') || mf.type.includes('video/mp4')
     );
 
-    const candidates = mp4Files.length > 0 ? mp4Files : mediaFiles;
+    const candidates = mp4Files.length > 0 ? mp4Files : validFiles;
 
     // Sort by closeness to target bitrate, preferring lower resolution
     const sorted = [...candidates].sort((a, b) => {

@@ -444,4 +444,133 @@ describe('AdPlayer Integration', () => {
       );
     });
   });
+
+  describe('Media Type Validation', () => {
+    it('should fail gracefully when only unsupported media (e.g. VPAID) is available', async () => {
+      // VAST with only VPAID JS
+      const VPAID_ONLY_VAST = `<?xml version="1.0" encoding="UTF-8"?>
+      <VAST version="4.0">
+        <Ad id="vpaid-ad">
+          <InLine>
+            <AdSystem>Adgent</AdSystem>
+            <AdTitle>VPAID Only</AdTitle>
+            <Creatives>
+              <Creative>
+                <Linear>
+                  <Duration>00:00:30</Duration>
+                  <MediaFiles>
+                    <MediaFile apiFramework="VPAID" type="application/javascript" delivery="progressive" width="1920" height="1080">
+                      <![CDATA[ https://example.com/vpaid.js ]]>
+                    </MediaFile>
+                  </MediaFiles>
+                </Linear>
+              </Creative>
+            </Creatives>
+          </InLine>
+        </Ad>
+      </VAST>`;
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(VPAID_ONLY_VAST)
+      });
+
+      const onError = vi.fn();
+      const player = new AdPlayer({
+        container,
+        vastUrl: 'https://example.com/vpaid.xml',
+        onError
+      });
+
+      await player.init();
+
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          code: 401 // FILE_NOT_FOUND
+        })
+      );
+    });
+  });
+
+  describe('Play/Pause UI', () => {
+    it('should show play button when ad is clicked and resume on button click', async () => {
+      // Mock click-through
+      const CLICK_VAST = `<?xml version="1.0" encoding="UTF-8"?>
+      <VAST version="4.0">
+        <Ad id="click-ad">
+          <InLine>
+            <AdSystem>Test</AdSystem>
+            <AdTitle>Click Test</AdTitle>
+            <Creatives>
+              <Creative>
+                <Linear>
+                  <Duration>00:00:10</Duration>
+                  <MediaFiles>
+                    <MediaFile delivery="progressive" type="video/mp4" width="1920" height="1080">
+                      https://example.com/video.mp4
+                    </MediaFile>
+                  </MediaFiles>
+                  <VideoClicks>
+                    <ClickThrough id="click">
+                        <![CDATA[https://example.com/click]]>
+                    </ClickThrough>
+                  </VideoClicks>
+                </Linear>
+              </Creative>
+            </Creatives>
+          </InLine>
+        </Ad>
+      </VAST>`;
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(CLICK_VAST)
+      });
+
+      const player = new AdPlayer({
+        container,
+        vastUrl: 'https://example.com/click.xml'
+      });
+
+      // Mock video methods for this test
+      const playSpy = vi.spyOn(HTMLVideoElement.prototype, 'play').mockResolvedValue(undefined);
+      const pauseSpy = vi.spyOn(HTMLVideoElement.prototype, 'pause').mockImplementation(() => {});
+
+      const events: string[] = [];
+      player.on((e) => events.push(e.type));
+
+      await player.init();
+      
+      const video = container.querySelector('video')!;
+      video.dispatchEvent(new Event('play'));
+      
+      // Wait for async events
+      await new Promise(resolve => setTimeout(resolve, 0));
+
+      expect(player.getState().status).toBe(PlaybackStatus.Playing);
+
+      // 1. Click Ad -> Should Pause and Show Overlay
+      video.click();
+      
+      // Check pause
+      expect(pauseSpy).toHaveBeenCalled();
+      
+      // Check overlay
+      const startBtn = container.querySelector('#adgent-start-btn');
+      expect(startBtn).not.toBeNull();
+      
+      // 2. Click Play Button -> Should Resume
+      (startBtn as HTMLElement).click();
+      
+      // Wait for async handler
+      await new Promise(resolve => setTimeout(resolve, 0));
+      
+      expect(playSpy).toHaveBeenCalledTimes(2); // Initial + Resume
+      expect(events).toContain('resume');
+      
+      // Ensure no duplicate start
+      const startCount = events.filter(e => e === 'start').length;
+      expect(startCount).toBe(1);
+    });
+  });
 });

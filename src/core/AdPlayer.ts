@@ -53,6 +53,7 @@ export class AdPlayer {
   private quartilesFired: Set<number> = new Set();
   private boundKeyHandler: ((e: KeyboardEvent) => void) | null = null;
   private focusTrap: HTMLElement | null = null;
+  private hasStarted = false;
 
   constructor(config: AdPlayerConfig) {
     this.config = { ...DEFAULT_CONFIG, ...config } as Required<AdPlayerConfig>;
@@ -347,7 +348,6 @@ export class AdPlayer {
 
     // Get ClickThrough URL
     const clickThrough = linear.videoClicks?.clickThrough;
-    // According to types/vast.ts, ClickThrough is an object with a url property
     const url = clickThrough?.url;
 
     if (url) {
@@ -355,6 +355,9 @@ export class AdPlayer {
       
       // Pause playback
       this.videoElement?.pause();
+      
+      // Show play button so user can resume
+      this.showStartOverlay();
       
       // Fire tracking pixels
       const clickTracking = linear.videoClicks?.clickTracking || [];
@@ -381,7 +384,15 @@ export class AdPlayer {
     if (this.videoElement) {
       try {
         await this.videoElement.play();
-        this.handlePlaybackStart();
+        
+        // If already started once, this is a Resume action
+        if (this.hasStarted) {
+          this.updateState({ status: PlaybackStatus.Playing });
+          this.emit({ type: 'resume' });
+          this.tracker?.track('resume');
+        } else {
+          this.handlePlaybackStart();
+        }
       } catch (error) {
         this.handleError(
           this.createError(
@@ -407,6 +418,7 @@ export class AdPlayer {
    * Handle successful playback start
    */
   private handlePlaybackStart(): void {
+    this.hasStarted = true;
     this.updateState({ status: PlaybackStatus.Playing });
     this.emit({ type: 'start' });
     this.config.onStart?.();
