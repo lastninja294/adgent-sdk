@@ -429,6 +429,8 @@ export class VASTParser {
     if (mediaFiles.length === 0) return null;
 
     // Filter to supported video MIME types (exclude VPAID/JS)
+    // We explicitly block VPAID/application/javascript to prevent
+    // performance degradation and security risks on Smart TVs
     const validFiles = mediaFiles.filter(mf => 
       mf.type.toLowerCase().startsWith('video/')
     );

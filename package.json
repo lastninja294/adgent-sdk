@@ -37,7 +37,7 @@
   "author": "Asadbek Omonboyev",
   "license": "MIT",
   "dependencies": {
-    "fast-xml-parser": "^4.3.4"
+    "fast-xml-parser": "^5.3.4"
   },
   "devDependencies": {
     "@babel/core": "^7.28.6",

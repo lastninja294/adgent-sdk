@@ -27,6 +27,7 @@ Lightweight, framework-agnostic VAST Player SDK for Smart TV platforms.
   - [Configuration Options](#configuration-options)
   - [Events](#events)
 - [Platform Support](#platform-support)
+- [Limitations](#limitations)
 - [Performance](#performance)
 - [Development](#development)
 - [License](#license)
@@ -362,6 +363,38 @@ sdk.destroy();
 #### WhaleOS
 - Naver Whale browser support
 - Whale-specific optimizations
+
+
+---
+
+## Limitations
+
+### No VPAID Support
+
+Adgent SDK explicitly **does not support** VPAID (Video Player-Ad Interface Definition) executables. VPAID is deliberately excluded for Smart TV platforms due to:
+
+1. **Performance**: VPAID requires executing arbitrary JavaScript within the player context, which severely degrades performance on resource-constrained TV hardware.
+2. **Stability**: Third-party VPAID scripts are a common source of memory leaks and application crashes on long-running TV apps.
+3. **Security**: Executing unverified external code poses significant security risks.
+4. **Modern Alternatives**: The industry has moved towards VAST 4.x and OMID (Open Measurement Interface Definition) for measurement, rendering VPAID obsolete for most modern ad serving use cases.
+
+The SDK automatically filters out VPAID media files and selects the best compatible video file (MP4/WebM).
+
+### Device Compatibility (Old TVs)
+
+Smart TVs, especially older models (2016-2019), have strict hardware limitations. To ensure smooth playback across all devices, we recommend the following constraints:
+
+1. **Video Codec**: H.264 (AVC) Main Profile Level 4.1 or lower.
+   - HEVC (H.265) is supported on newer models but may fail on older ones.
+   - VP9 is widely supported but less reliable for ad insertion than H.264.
+2. **Resolution**: 1920x1080 (1080p) maximum.
+   - 4K (UHD) ads are **penalized** by the SDK's selection algorithm as they consume excessive memory and can cause UI stuttering or crashes on budget TVs.
+3. **Bitrate**: 1500-2500 kbps recommended.
+   - Bitrates > 4000 kbps may cause buffering on TV WiFi chips.
+4. **Audio Codec**: AAC-LC (Low Complexity).
+5. **Container**: MP4 (`video/mp4`) is preferred over all other containers for maximum compatibility.
+
+The SDK's selection algorithm actively prioritizes streams matching these criteria to prevent playback failures on legacy hardware.
 
 ---
 
