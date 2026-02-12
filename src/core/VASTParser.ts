@@ -192,16 +192,32 @@ export class VASTParser {
    * Fetch URL with timeout
    */
   private async fetchWithTimeout(url: string): Promise<string> {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(
-      () => controller.abort(),
-      this.config.timeout
-    );
+    // AbortController is not available on some Smart TV platforms (WebOS, Tizen, Vidaa)
+    const hasAbortController = typeof AbortController !== 'undefined';
+    const controller = hasAbortController ? new AbortController() : null;
+
+    const timeoutId = setTimeout(() => {
+      if (controller) controller.abort();
+    }, this.config.timeout);
 
     try {
-      const response = await this.config.fetchFn(url, {
-        signal: controller.signal
-      });
+      const fetchOptions: RequestInit = {};
+      if (controller) {
+        fetchOptions.signal = controller.signal;
+      }
+
+      const fetchPromise = this.config.fetchFn(url, fetchOptions);
+
+      // If no AbortController, race against a timeout promise
+      let response: Response;
+      if (!controller) {
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Request timed out')), this.config.timeout)
+        );
+        response = await Promise.race([fetchPromise, timeoutPromise]);
+      } else {
+        response = await fetchPromise;
+      }
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
