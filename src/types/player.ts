@@ -30,7 +30,18 @@ export interface AdPlayerConfig {
   
   /** Skip offset override in seconds (0 = no skip allowed) */
   skipOffset?: number;
-  
+
+  /**
+   * Enable VPAID 2.0 (JavaScript) creative playback (default: false).
+   * Opt-in only — when unset, behavior is unchanged and VPAID media files
+   * are filtered out exactly as before. Intended for web integrations, not
+   * Smart TV platforms.
+   */
+  enableVPAID?: boolean;
+
+  /** Max time in ms to wait for a VPAID handshake to complete (default: 8000) */
+  vpaidTimeout?: number;
+
   /** Callback when ad playback completes */
   onComplete?: () => void;
   

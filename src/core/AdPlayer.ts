@@ -12,10 +12,11 @@ import {
   AdError,
   PlaybackStatus
 } from '@/types/player';
-import { Ad, MediaFile, TrackingEventType, VASTErrorCode } from '@/types/vast';
+import { Ad, Linear, MediaFile, TrackingEventType, VASTErrorCode } from '@/types/vast';
 import { VASTParser } from '@/core/VASTParser';
 import { AdTracker } from '@/core/AdTracker';
 import { PlatformAdapter, getPlatformAdapter } from '@/core/PlatformAdapter';
+import { VPAIDAdUnit } from '@/core/VPAIDAdUnit';
 import { KeyAction } from '@/types/platform';
 
 /** Default configuration */
@@ -24,7 +25,9 @@ const DEFAULT_CONFIG: Partial<AdPlayerConfig> = {
   maxWrapperDepth: 5,
   timeout: 10000,
   debug: false,
-  skipButtonText: 'Skip Ad'
+  skipButtonText: 'Skip Ad',
+  enableVPAID: false,
+  vpaidTimeout: 8000
 };
 
 /**
@@ -45,15 +48,21 @@ export class AdPlayer {
   private skipButtonElement: HTMLElement | null = null;
   private progressElement: HTMLElement | null = null;
   private tracker: AdTracker | null = null;
-  
+  private vpaidAdUnit: VPAIDAdUnit | null = null;
+  private resizeObserver: ResizeObserver | null = null;
+
   private state: AdPlayerState;
   private ads: Ad[] = [];
   private listeners: Set<AdPlayerEventListener> = new Set();
   private eventListeners = new Map<string, EventListener>();
   private quartilesFired: Set<number> = new Set();
+  private impressionsFired = false;
   private boundKeyHandler: ((e: KeyboardEvent) => void) | null = null;
   private focusTrap: HTMLElement | null = null;
   private hasStarted = false;
+  private destroyed = false;
+  /** True once the VPAID handshake has actually completed (unit.load() resolved) */
+  private vpaidReady = false;
 
   constructor(config: AdPlayerConfig) {
     this.config = { ...DEFAULT_CONFIG, ...config } as Required<AdPlayerConfig>;
@@ -94,9 +103,15 @@ export class AdPlayer {
 
     this.updateState({ status: PlaybackStatus.Loading });
 
+    let vpaidFailure: Error | null = null;
+
     try {
       const result = await this.parser.parse(this.config.vastUrl);
-      
+
+      // destroy() may have been called while the VAST fetch was in flight —
+      // don't resurrect a video element / listeners into a torn-down player.
+      if (this.destroyed) return;
+
       if (!result.success || !result.response) {
         throw this.createError(
           result.error?.code || VASTErrorCode.NO_VAST_RESPONSE,
@@ -105,7 +120,7 @@ export class AdPlayer {
       }
 
       this.ads = result.response.ads;
-      
+
       if (this.ads.length === 0) {
         throw this.createError(
           VASTErrorCode.NO_VAST_RESPONSE,
@@ -121,22 +136,47 @@ export class AdPlayer {
         );
       }
 
+      const trackingEvents = this.parser.aggregateTrackingEvents(this.ads);
+      this.tracker = new AdTracker(trackingEvents, { debug: this.config.debug });
+
+      if (this.config.enableVPAID) {
+        const vpaidMediaFile = this.parser.selectVPAIDMediaFile(linear.mediaFiles);
+
+        if (vpaidMediaFile) {
+          try {
+            await this.initVPAID(vpaidMediaFile, linear);
+            if (this.destroyed) return;
+            this.setupFocusManagement();
+            return;
+          } catch (error) {
+            if (this.destroyed) return;
+
+            vpaidFailure = error instanceof Error ? error : new Error(String(error));
+            this.log(`VPAID load failed, attempting native fallback: ${vpaidFailure.message}`);
+
+            // Reset any state a premature event from the abandoned VPAID
+            // attempt may have set (e.g. AdImpression firing before
+            // AdLoaded/timeout) so it doesn't silently short-circuit the
+            // native fallback that's about to play.
+            this.impressionsFired = false;
+            this.quartilesFired.clear();
+            this.hasStarted = false;
+          }
+        }
+      }
+
       const mediaFile = this.parser.selectBestMediaFile(
         linear.mediaFiles,
         this.config.targetBitrate
       );
 
       if (!mediaFile) {
-        throw this.createError(
-          VASTErrorCode.FILE_NOT_FOUND,
-          'No suitable media file found'
-        );
+        throw vpaidFailure
+          ? this.createError(VASTErrorCode.VPAID_ERROR, vpaidFailure.message)
+          : this.createError(VASTErrorCode.FILE_NOT_FOUND, 'No suitable media file found');
       }
 
       this.updateState({ mediaFile });
-
-      const trackingEvents = this.parser.aggregateTrackingEvents(this.ads);
-      this.tracker = new AdTracker(trackingEvents, { debug: this.config.debug });
       this.tracker.updateMacroContext({ assetUri: mediaFile.url });
 
       this.createVideoElement(mediaFile);
@@ -144,10 +184,12 @@ export class AdPlayer {
       await this.attemptAutoplay();
 
     } catch (error) {
-      const adError = error instanceof Error 
+      if (this.destroyed) return;
+
+      const adError = error instanceof Error
         ? this.createError(VASTErrorCode.UNDEFINED_ERROR, error.message)
         : error as AdError;
-      
+
       this.handleError(adError);
     }
   }
@@ -164,6 +206,222 @@ export class AdPlayer {
       }
     }
     return null;
+  }
+
+  /**
+   * Load and drive a VPAID 2.0 creative (opt-in, see config.enableVPAID).
+   * Wires the VPAID lifecycle onto the same tracker/event/callback pipeline
+   * the native <video> path uses. Throws if load() fails/times out — the
+   * caller (init()) decides whether to fall back to a native MediaFile.
+   */
+  private async initVPAID(mediaFile: MediaFile, linear: Linear): Promise<void> {
+    this.tracker?.updateMacroContext({ assetUri: mediaFile.url });
+    this.updateState({ mediaFile });
+
+    const unit = new VPAIDAdUnit(
+      this.config.container,
+      mediaFile,
+      linear,
+      this.platform,
+      {
+        timeout: this.config.vpaidTimeout,
+        desiredBitrate: this.config.targetBitrate,
+        debug: this.config.debug
+      }
+    );
+
+    unit.on('AdImpression', () => this.fireImpressionPixels());
+    unit.on('AdStarted', () => this.fireImpressionPixels());
+
+    unit.on('AdVideoStart', () => this.handleVPAIDPlayOrResume());
+    unit.on('AdPlaying', () => this.handleVPAIDPlayOrResume());
+
+    // Reuses the same quartilesFired set the native percentage-based path
+    // uses, guarding against a creative re-dispatching a quartile event
+    // (buggy creative, or a re-fire after a seek/ad-pod stitch) from
+    // double-tracking or double-emitting to host listeners.
+    unit.on('AdVideoFirstQuartile', () => {
+      if (this.quartilesFired.has(25)) return;
+      this.quartilesFired.add(25);
+      this.tracker?.track('firstQuartile');
+      this.emit({ type: 'quartile', data: { quartile: 'firstQuartile' } });
+    });
+
+    unit.on('AdVideoMidpoint', () => {
+      if (this.quartilesFired.has(50)) return;
+      this.quartilesFired.add(50);
+      this.tracker?.track('midpoint');
+      this.emit({ type: 'quartile', data: { quartile: 'midpoint' } });
+    });
+
+    unit.on('AdVideoThirdQuartile', () => {
+      if (this.quartilesFired.has(75)) return;
+      this.quartilesFired.add(75);
+      this.tracker?.track('thirdQuartile');
+      this.emit({ type: 'quartile', data: { quartile: 'thirdQuartile' } });
+    });
+
+    unit.on('AdVideoComplete', () => this.handleComplete());
+
+    unit.on('AdPaused', () => {
+      if (this.state.status !== PlaybackStatus.Completed) {
+        this.updateState({ status: PlaybackStatus.Paused });
+        this.emit({ type: 'pause' });
+        this.tracker?.track('pause');
+      }
+    });
+
+    unit.on('AdSkippableStateChange', () => {
+      // Some creatives report skippable state synchronously from within
+      // initAd(), before startAd() has ever been called — ignore it until
+      // the ad has actually started; handleVPAIDPlayOrResume() re-checks
+      // getSkippableState() itself once it does.
+      if (!this.hasStarted) return;
+
+      if (unit.getSkippableState()) {
+        this.showVPAIDSkipButton();
+      } else {
+        this.hideVPAIDSkipButton();
+      }
+    });
+
+    unit.on('AdSkipped', () => this.finalizeSkip());
+
+    unit.on('AdClickThru', (url?: string, _id?: string, playerHandles?: boolean) => {
+      this.handleVPAIDClickThru(linear, url, playerHandles);
+    });
+
+    unit.on('AdRemainingTimeChange', (remaining?: number) => {
+      const duration = unit.getDuration();
+      // duration > 0 already excludes NaN duration (NaN > 0 is false);
+      // remaining still needs its own explicit isNaN check since typeof
+      // NaN === 'number'.
+      if (typeof remaining === 'number' && !isNaN(remaining) && duration > 0) {
+        this.updateProgress(Math.max(0, duration - remaining), duration);
+      }
+    });
+
+    unit.on('AdError', (message?: string) => {
+      this.handleError(
+        this.createError(
+          VASTErrorCode.VPAID_ERROR,
+          typeof message === 'string' ? message : 'VPAID ad error'
+        )
+      );
+    });
+
+    // Assigned before await so a concurrent destroy() during load() can
+    // still reach and tear down this ad unit (VPAIDAdUnit.destroy() is
+    // idempotent and safe to call mid-load).
+    this.vpaidAdUnit = unit;
+
+    if (typeof ResizeObserver !== 'undefined') {
+      this.resizeObserver = new ResizeObserver(() => {
+        const { clientWidth, clientHeight } = this.config.container;
+        if (clientWidth > 0 && clientHeight > 0) {
+          unit.resize(clientWidth, clientHeight);
+        }
+      });
+      this.resizeObserver.observe(this.config.container);
+    }
+
+    try {
+      await unit.load();
+      this.vpaidReady = true;
+    } catch (error) {
+      this.resizeObserver?.disconnect();
+      this.resizeObserver = null;
+      this.vpaidAdUnit = null;
+      unit.destroy();
+      throw error;
+    }
+  }
+
+  /**
+   * First-play/resume handling for VPAID. Deliberately does not reuse
+   * handlePlaybackStart(): that method calls setupSkipButton(), which is
+   * driven by VAST skipoffset and would leave a stuck, non-clickable "Skip
+   * in Ns" button if a VPAID creative's Linear also happened to carry a
+   * skipoffset — VPAID skippability is boolean-driven via
+   * AdSkippableStateChange/getAdSkippableState() instead.
+   *
+   * Both AdVideoStart and AdPlaying route here, but only status === Paused
+   * is treated as an actual resume — many real creatives fire AdPlaying
+   * immediately after AdVideoStart as a generic "now playing" signal, not
+   * exclusively after a pause, and reacting to that as a resume would fire
+   * a spurious 'resume' event/pixel right after the ad starts.
+   */
+  private handleVPAIDPlayOrResume(): void {
+    if (this.state.status === PlaybackStatus.Paused) {
+      this.handleResume();
+      return;
+    }
+
+    // Already started and not paused — e.g. a duplicate AdVideoStart/
+    // AdPlaying, or one arriving after the ad reached a terminal state.
+    // Nothing to do.
+    if (this.hasStarted) return;
+
+    this.hasStarted = true;
+    this.updateState({ status: PlaybackStatus.Playing });
+    this.emit({ type: 'start' });
+    this.config.onStart?.();
+
+    this.fireImpressionPixels();
+    this.tracker?.track('start');
+    this.tracker?.track('creativeView');
+
+    this.setupProgressUI();
+
+    if (this.vpaidAdUnit?.getSkippableState()) {
+      this.showVPAIDSkipButton();
+    }
+
+    this.log('VPAID playback started');
+  }
+
+  /**
+   * Show the VPAID skip button (boolean-driven, no countdown text — VPAID
+   * doesn't expose an offset, only a skippable/not-skippable state).
+   */
+  private showVPAIDSkipButton(): void {
+    this.updateState({ canSkip: true, skipCountdown: 0 });
+
+    if (this.skipButtonElement) return;
+
+    const skipBtn = this.createSkipButton(this.config.skipButtonText);
+    this.config.container.appendChild(skipBtn);
+    this.skipButtonElement = skipBtn;
+  }
+
+  /**
+   * Hide the VPAID skip button (creative reported skippable: false again)
+   */
+  private hideVPAIDSkipButton(): void {
+    this.updateState({ canSkip: false });
+    this.skipButtonElement?.remove();
+    this.skipButtonElement = null;
+  }
+
+  /**
+   * Handle a VPAID AdClickThru event. Falls back to the VAST ClickThrough
+   * URL when the creative doesn't supply one (common with GAM/SSP wrappers).
+   */
+  private handleVPAIDClickThru(linear: Linear, url?: string, playerHandles?: boolean): void {
+    const clickThroughUrl = url || linear.videoClicks?.clickThrough?.url;
+    if (!clickThroughUrl) return;
+
+    const clickTracking = linear.videoClicks?.clickTracking || [];
+    clickTracking.forEach(tracking => {
+      if (tracking.url) this.tracker?.firePixel(tracking.url);
+    });
+
+    if (playerHandles) {
+      this.platform.openExternalLink(clickThroughUrl);
+    }
+
+    this.emit({ type: 'click', data: { url: clickThroughUrl } });
+    this.config.onClick?.(clickThroughUrl);
   }
 
   /**
@@ -380,19 +638,11 @@ export class AdPlayer {
    */
   private async onStartClick(): Promise<void> {
     this.removeOverlay();
-    
+
     if (this.videoElement) {
       try {
         await this.videoElement.play();
-        
-        // If already started once, this is a Resume action
-        if (this.hasStarted) {
-          this.updateState({ status: PlaybackStatus.Playing });
-          this.emit({ type: 'resume' });
-          this.tracker?.track('resume');
-        } else {
-          this.handlePlaybackStart();
-        }
+        this.handlePlayOrResume();
       } catch (error) {
         this.handleError(
           this.createError(
@@ -415,6 +665,33 @@ export class AdPlayer {
   }
 
   /**
+   * If already started once, this is a Resume action; otherwise the first
+   * playback start. Shared by onStartClick() (autoplay-fallback overlay).
+   * Deliberately keyed on hasStarted rather than status === Paused: the
+   * native <video>'s 'pause' event fires as a queued task per spec (not
+   * synchronously with the pause() call in onAdClick()), so status may not
+   * have flipped to Paused yet by the time the resume click lands close
+   * behind it — hasStarted has no such timing dependency.
+   */
+  private handlePlayOrResume(): void {
+    if (this.hasStarted) {
+      this.handleResume();
+    } else {
+      this.handlePlaybackStart();
+    }
+  }
+
+  /**
+   * Shared resume bookkeeping for both the native and VPAID paths. Callers
+   * are expected to have already confirmed status === Paused.
+   */
+  private handleResume(): void {
+    this.updateState({ status: PlaybackStatus.Playing });
+    this.emit({ type: 'resume' });
+    this.tracker?.track('resume');
+  }
+
+  /**
    * Handle successful playback start
    */
   private handlePlaybackStart(): void {
@@ -423,8 +700,7 @@ export class AdPlayer {
     this.emit({ type: 'start' });
     this.config.onStart?.();
 
-    const impressionUrls = this.parser.aggregateImpressions(this.ads);
-    this.tracker?.fireImpressions(impressionUrls);
+    this.fireImpressionPixels();
     this.tracker?.track('start');
     this.tracker?.track('creativeView');
 
@@ -435,26 +711,53 @@ export class AdPlayer {
   }
 
   /**
+   * Fire VAST impression pixels exactly once. Idempotent because VPAID
+   * creatives commonly signal impression via more than one event
+   * (AdImpression, AdStarted, AdVideoStart) and AdTracker.fireImpressions()
+   * itself has no dedup.
+   */
+  private fireImpressionPixels(): void {
+    if (this.impressionsFired) return;
+    this.impressionsFired = true;
+
+    const impressionUrls = this.parser.aggregateImpressions(this.ads);
+    this.tracker?.fireImpressions(impressionUrls);
+  }
+
+  /**
    * Handle time updates for progress tracking
    */
   private handleTimeUpdate(video: HTMLVideoElement): void {
     const currentTime = video.currentTime;
     const duration = video.duration;
-    
+
     if (!duration || isNaN(duration)) return;
 
+    this.updateProgress(currentTime, duration);
+    this.updateSkipCountdown(currentTime);
+
+    const percentage = (currentTime / duration) * 100;
+    this.fireQuartileEvents(percentage);
+  }
+
+  /**
+   * Shared progress bookkeeping (state, macro context, progress UI, emit).
+   * Used by the native <video> timeupdate path and VPAID's
+   * AdRemainingTimeChange path. Deliberately excludes skip-countdown and
+   * quartile firing — native quartiles come from percentage math here,
+   * VPAID quartiles come from explicit ad-unit events instead, and VPAID's
+   * skip button is boolean-driven rather than offset/countdown-driven.
+   *
+   * Callers are expected to have already validated duration/currentTime
+   * (handleTimeUpdate checks duration; the AdRemainingTimeChange handler
+   * checks both duration and remaining, which currentTime is derived from).
+   */
+  private updateProgress(currentTime: number, duration: number): void {
     const percentage = (currentTime / duration) * 100;
     const quartile = this.calculateQuartile(percentage);
 
-    this.updateState({
-      currentTime,
-      duration
-    });
-
-    this.updateSkipCountdown(currentTime);
-
+    this.updateState({ currentTime, duration });
     this.tracker?.updateMacroContext({ adPlayhead: currentTime });
-    
     this.updateProgressUI(currentTime, duration);
 
     const progress: AdProgress = {
@@ -465,8 +768,6 @@ export class AdPlayer {
     };
     this.emit({ type: 'progress', data: progress });
     this.config.onProgress?.(progress);
-
-    this.fireQuartileEvents(percentage);
   }
 
   /**
@@ -513,6 +814,18 @@ export class AdPlayer {
 
     this.updateState({ skipCountdown: skipOffset, canSkip: false });
 
+    const skipBtn = this.createSkipButton(`Skip in ${skipOffset}s`);
+    this.config.container.appendChild(skipBtn);
+    this.skipButtonElement = skipBtn;
+  }
+
+  /**
+   * Shared #adgent-skip-btn markup for both the native (offset/countdown)
+   * and VPAID (boolean-state) skip buttons — only the initial text and
+   * click handler differ; updateSkipCountdown() mutates text/opacity on
+   * the native path afterward.
+   */
+  private createSkipButton(text: string): HTMLButtonElement {
     const skipBtn = document.createElement('button');
     skipBtn.id = 'adgent-skip-btn';
     skipBtn.style.cssText = `
@@ -529,11 +842,9 @@ export class AdPlayer {
       z-index: 101;
       transition: opacity 0.3s;
     `;
-    skipBtn.textContent = `Skip in ${skipOffset}s`;
+    skipBtn.textContent = text;
     skipBtn.addEventListener('click', () => this.skip());
-
-    this.config.container.appendChild(skipBtn);
-    this.skipButtonElement = skipBtn;
+    return skipBtn;
   }
 
   /**
@@ -568,6 +879,20 @@ export class AdPlayer {
       return;
     }
 
+    if (this.vpaidAdUnit) {
+      // Finalize happens on the resulting AdSkipped event, not synchronously
+      this.vpaidAdUnit.skipAd();
+      return;
+    }
+
+    this.finalizeSkip();
+  }
+
+  /**
+   * Complete the skip: track, emit, callback, destroy. Called synchronously
+   * for the native path, and from the VPAID AdSkipped event handler.
+   */
+  private finalizeSkip(): void {
     this.tracker?.track('skip');
     this.emit({ type: 'skip' });
     this.config.onSkip?.();
@@ -580,6 +905,18 @@ export class AdPlayer {
    * Handle ad completion
    */
   private handleComplete(): void {
+    // Guards two real-world cases: a VPAID creative firing AdVideoComplete
+    // after it already reported a (non-fatal, from its perspective) AdError
+    // — status is already Error, don't also report completion — and a
+    // creative that re-fires AdVideoComplete, which would otherwise
+    // re-invoke onComplete for an ad already reported complete.
+    if (
+      this.state.status === PlaybackStatus.Error ||
+      this.state.status === PlaybackStatus.Completed
+    ) {
+      return;
+    }
+
     this.updateState({ status: PlaybackStatus.Completed });
     this.tracker?.track('complete');
     this.emit({ type: 'complete' });
@@ -710,11 +1047,11 @@ export class AdPlayer {
         break;
 
       case KeyAction.Play:
-        this.videoElement?.play();
+        this.controlPlay();
         break;
 
       case KeyAction.Pause:
-        this.videoElement?.pause();
+        this.controlPause();
         break;
 
       case KeyAction.Left:
@@ -729,23 +1066,72 @@ export class AdPlayer {
    * Unmute video (call after playback starts if needed)
    */
   unmute(): void {
-    if (this.videoElement) {
-      this.videoElement.muted = false;
-      this.updateState({ muted: false });
-      this.tracker?.track('unmute');
-      this.emit({ type: 'unmute' });
+    if (this.vpaidAdUnit) {
+      // vpaidAdUnit is assigned before the handshake completes (see
+      // initVPAID) so a concurrent destroy() can still reach it — but that
+      // means setAdVolume() would silently no-op on the not-yet-ready raw
+      // ad unit. Don't report state/fire tracking for an action that
+      // didn't actually reach the creative.
+      if (!this.vpaidReady) return;
+    } else if (!this.videoElement) {
+      return;
     }
+
+    this.controlSetMuted(false);
+    this.updateState({ muted: false });
+    this.tracker?.track('unmute');
+    this.emit({ type: 'unmute' });
   }
 
   /**
    * Mute video
    */
   mute(): void {
-    if (this.videoElement) {
-      this.videoElement.muted = true;
-      this.updateState({ muted: true });
-      this.tracker?.track('mute');
-      this.emit({ type: 'mute' });
+    if (this.vpaidAdUnit) {
+      if (!this.vpaidReady) return;
+    } else if (!this.videoElement) {
+      return;
+    }
+
+    this.controlSetMuted(true);
+    this.updateState({ muted: true });
+    this.tracker?.track('mute');
+    this.emit({ type: 'mute' });
+  }
+
+  /**
+   * Route a play command to whichever backend is active (VPAID ad unit or
+   * native <video>).
+   */
+  private controlPlay(): void {
+    if (this.vpaidAdUnit) {
+      this.vpaidAdUnit.resumeAd();
+    } else {
+      this.videoElement?.play();
+    }
+  }
+
+  /**
+   * Route a pause command to whichever backend is active.
+   */
+  private controlPause(): void {
+    if (this.vpaidAdUnit) {
+      this.vpaidAdUnit.pauseAd();
+    } else {
+      this.videoElement?.pause();
+    }
+  }
+
+  /**
+   * Route a mute/unmute command to whichever backend is active. Callers
+   * are expected to have already confirmed that backend is ready to act
+   * (see the vpaidReady/videoElement checks in mute()/unmute()).
+   */
+  private controlSetMuted(muted: boolean): void {
+    if (this.vpaidAdUnit) {
+      this.vpaidAdUnit.setAdVolume(muted ? 0 : 1);
+    } else if (this.videoElement) {
+      this.videoElement.muted = muted;
     }
   }
 
@@ -768,6 +1154,20 @@ export class AdPlayer {
    * Clean up all resources
    */
   destroy(): void {
+    this.destroyed = true;
+    this.vpaidReady = false;
+
+    if (this.vpaidAdUnit) {
+      const unit = this.vpaidAdUnit;
+      this.vpaidAdUnit = null;
+      unit.destroy();
+    }
+
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+      this.resizeObserver = null;
+    }
+
     if (this.boundKeyHandler) {
       document.removeEventListener('keydown', this.boundKeyHandler, true);
       this.boundKeyHandler = null;
@@ -793,6 +1193,7 @@ export class AdPlayer {
 
     this.tracker?.reset();
     this.quartilesFired.clear();
+    this.impressionsFired = false;
     this.listeners.clear();
     this.ads = [];
 

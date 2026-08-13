@@ -28,6 +28,8 @@ Lightweight, framework-agnostic VAST Player SDK for Smart TV platforms.
   - [Events](#events)
 - [Platform Support](#platform-support)
 - [Limitations](#limitations)
+  - [No VPAID Support by Default](#no-vpaid-support-by-default)
+  - [VPAID Support (opt-in, for web)](#vpaid-support-opt-in-for-web)
 - [Performance](#performance)
 - [Development](#development)
 - [License](#license)
@@ -121,6 +123,8 @@ yarn add adgent-sdk
 | `skipOffset` | `number` | No | - | Override skip offset in seconds |
 | `skipButtonText` | `string` | No | `'Skip Ad'` | Custom skip button text |
 | `mutedAutoplay` | `boolean` | No | `true` | Enable muted autoplay for compliance |
+| `enableVPAID` | `boolean` | No | `false` | Opt-in VPAID 2.0 creative playback (web only, see [VPAID Support](#vpaid-support-opt-in-for-web)) |
+| `vpaidTimeout` | `number` | No | `8000` | Max time in ms to wait for the VPAID handshake |
 
 ### Callback Events
 
@@ -369,16 +373,38 @@ sdk.destroy();
 
 ## Limitations
 
-### No VPAID Support
+### No VPAID Support by Default
 
-Adgent SDK explicitly **does not support** VPAID (Video Player-Ad Interface Definition) executables. VPAID is deliberately excluded for Smart TV platforms due to:
+Unless `enableVPAID` is explicitly set (see [VPAID Support](#vpaid-support-opt-in-for-web) below), Adgent SDK **does not support** VPAID (Video Player-Ad Interface Definition) executables. This remains the default, and is what Smart TV integrations should use, because:
 
 1. **Performance**: VPAID requires executing arbitrary JavaScript within the player context, which severely degrades performance on resource-constrained TV hardware.
 2. **Stability**: Third-party VPAID scripts are a common source of memory leaks and application crashes on long-running TV apps.
 3. **Security**: Executing unverified external code poses significant security risks.
 4. **Modern Alternatives**: The industry has moved towards VAST 4.x and OMID (Open Measurement Interface Definition) for measurement, rendering VPAID obsolete for most modern ad serving use cases.
 
-The SDK automatically filters out VPAID media files and selects the best compatible video file (MP4/WebM).
+When `enableVPAID` is not set, the SDK automatically filters out VPAID media files and selects the best compatible video file (MP4/WebM) exactly as before — Smart TV behavior is unaffected by the opt-in feature described below.
+
+### VPAID Support (opt-in, for web)
+
+For web/browser integrations — e.g. replacing Google IMA SDK — pass `enableVPAID: true` to play VPAID 2.0 JavaScript creatives from GAM/SSPs:
+
+```typescript
+const sdk = new AdgentSDK({
+  container: document.getElementById('ad-container')!,
+  vastUrl: 'https://example.com/vast.xml',
+  enableVPAID: true,
+  vpaidTimeout: 8000, // ms to wait for the handshake (default: 8000)
+});
+```
+
+**How it works**: the VPAID creative's JavaScript runs inside a sandboxed "friendly iframe" (`sandbox="allow-scripts allow-same-origin allow-popups"`), the same technique IMA SDK uses. `allow-same-origin` is required so the creative can drive the `<video>` element the SDK hands it; `allow-popups` is required because many real-world creatives open the click-through URL themselves via `window.open()` instead of delegating to the player (without it, that call is silently blocked and clicking the ad does nothing). Combined with `allow-scripts`, this is a *convention*, not a real security boundary: the creative's script could, in principle, strip its own sandbox attribute. Running any VPAID creative means executing third-party ad JavaScript in your page; there is no way around that trade-off if VPAID support is enabled.
+
+**Fallback**: if the VPAID handshake fails or times out and the VAST response also includes a native MP4/WebM `MediaFile`, the SDK transparently falls back to native `<video>` playback. If no fallback exists, `onError` fires with a `VPAID_ERROR` (901) code.
+
+**v1 limitations** (not implemented):
+- VPAID 1.0 / Flash (`application/x-shockwave-flash`) — JS-only (VPAID 2.0)
+- `expandAd`/`collapseAd`, fullscreen, companion ads, ad pods
+- No SDK-level "tap to retry" UI if a VPAID creative's own internal autoplay fails — the ad unit owns its own `<video>`/`play()`, not the player, so this is inherent to VPAID's execution model rather than something the player can intercept.
 
 ### Device Compatibility (Old TVs)
 
@@ -404,9 +430,11 @@ The SDK's selection algorithm actively prioritizes streams matching these criter
 
 | Metric | Value |
 |--------|-------|
-| Gzipped Size | < 20 KB |
-| Minified Size | ~50 KB |
+| Gzipped Size | 16.6 KB (`dist/adgent-sdk.umd.js`, incl. VPAID support) |
+| Minified Size | ~57 KB |
 | Dependencies | 1 (`fast-xml-parser`) |
+
+VPAID support ships in the same single bundle rather than a separate lazy chunk — the TV distribution format (UMD, `<script>` tag) has no async-chunk runtime, so code-splitting it out wouldn't help the platforms with the tightest size constraints. Re-run `npm run build` after future changes to keep this number current.
 
 ### Optimization Tips
 

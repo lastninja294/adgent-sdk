@@ -379,7 +379,8 @@ export class VASTParser {
       bitrate: mf['@_bitrate'] ? parseInt(mf['@_bitrate'], 10) : undefined,
       codec: mf['@_codec'],
       scalable: mf['@_scalable'],
-      maintainAspectRatio: mf['@_maintainAspectRatio']
+      maintainAspectRatio: mf['@_maintainAspectRatio'],
+      apiFramework: mf['@_apiFramework']
     }));
   }
 
@@ -476,6 +477,19 @@ export class VASTParser {
     });
 
     return sorted[0] || null;
+  }
+
+  /**
+   * Find a VPAID (JavaScript) media file, if one is present
+   * Matches strictly on apiFramework="VPAID" per the VAST spec — does not
+   * MIME-sniff application/javascript, and does not support legacy VPAID 1.0
+   * (Flash/application/x-shockwave-flash).
+   */
+  selectVPAIDMediaFile(mediaFiles: MediaFile[]): MediaFile | null {
+    return (
+      mediaFiles.find((mf) => mf.apiFramework?.toLowerCase() === 'vpaid') ||
+      null
+    );
   }
 
   /**

@@ -23,6 +23,7 @@ export { AdPlayer, AdgentSDK } from '@/core/AdPlayer';
 export { VASTParser } from '@/core/VASTParser';
 export { AdTracker } from '@/core/AdTracker';
 export { PlatformAdapter, getPlatformAdapter } from '@/core/PlatformAdapter';
+export { VPAIDAdUnit } from '@/core/VPAIDAdUnit';
 
 // Type exports
 export type {
@@ -72,6 +73,15 @@ export {
   DEFAULT_KEY_CODES,
   PLATFORM_DETECTION_PATTERNS 
 } from '@/types/platform';
+
+export type {
+  // VPAID types
+  IVPAIDAdUnit,
+  VPAIDPlayerEventName,
+  VPAIDCreativeData,
+  VPAIDEnvironmentVars,
+  VPAIDAdUnitOptions
+} from '@/types/vpaid';
 
 // Utility exports
 export { replaceMacros } from '@/utils/macros';

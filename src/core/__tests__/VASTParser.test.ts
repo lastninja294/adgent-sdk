@@ -317,6 +317,100 @@ describe('VASTParser', () => {
     });
   });
 
+  describe('selectVPAIDMediaFile', () => {
+    const createMediaFile = (
+      type: string,
+      apiFramework?: string
+    ): MediaFile => ({
+      url: 'https://example.com/creative.js',
+      delivery: 'progressive',
+      type,
+      width: 1920,
+      height: 1080,
+      apiFramework
+    });
+
+    it('should find a media file with apiFramework="VPAID"', () => {
+      const parser = new VASTParser();
+      const mediaFiles = [
+        createMediaFile('video/mp4'),
+        createMediaFile('application/javascript', 'VPAID')
+      ];
+
+      const vpaid = parser.selectVPAIDMediaFile(mediaFiles);
+      expect(vpaid?.type).toBe('application/javascript');
+    });
+
+    it('should match apiFramework case-insensitively', () => {
+      const parser = new VASTParser();
+      const mediaFiles = [createMediaFile('application/javascript', 'vpaid')];
+
+      const vpaid = parser.selectVPAIDMediaFile(mediaFiles);
+      expect(vpaid).not.toBeNull();
+    });
+
+    it('should return null when no VPAID media file is present', () => {
+      const parser = new VASTParser();
+      const mediaFiles = [createMediaFile('video/mp4')];
+
+      expect(parser.selectVPAIDMediaFile(mediaFiles)).toBeNull();
+    });
+
+    it('should not match plain application/javascript without apiFramework', () => {
+      const parser = new VASTParser();
+      const mediaFiles = [createMediaFile('application/javascript')];
+
+      expect(parser.selectVPAIDMediaFile(mediaFiles)).toBeNull();
+    });
+
+    it('should not affect selectBestMediaFile when VPAID and MP4 coexist', () => {
+      const parser = new VASTParser();
+      const mediaFiles = [
+        createMediaFile('application/javascript', 'VPAID'),
+        createMediaFile('video/mp4')
+      ];
+
+      const best = parser.selectBestMediaFile(mediaFiles, 2500);
+      expect(best?.type).toBe('video/mp4');
+    });
+
+    it('should parse apiFramework from real VAST XML', async () => {
+      const vpaidVast = `<?xml version="1.0" encoding="UTF-8"?>
+      <VAST version="4.0">
+        <Ad id="vpaid-ad">
+          <InLine>
+            <AdSystem>Test</AdSystem>
+            <AdTitle>VPAID Test</AdTitle>
+            <Creatives>
+              <Creative>
+                <Linear>
+                  <Duration>00:00:30</Duration>
+                  <MediaFiles>
+                    <MediaFile apiFramework="VPAID" type="application/javascript" delivery="progressive" width="1920" height="1080">
+                      <![CDATA[https://example.com/vpaid.js]]>
+                    </MediaFile>
+                  </MediaFiles>
+                </Linear>
+              </Creative>
+            </Creatives>
+          </InLine>
+        </Ad>
+      </VAST>`;
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(vpaidVast)
+      });
+
+      const parser = new VASTParser();
+      const result = await parser.parse('https://example.com/vast.xml');
+      const linear = result.response?.ads[0].creatives[0].linear;
+
+      expect(linear?.mediaFiles[0].apiFramework).toBe('VPAID');
+      expect(parser.selectVPAIDMediaFile(linear!.mediaFiles)?.url).toContain('vpaid.js');
+    });
+  });
+
   describe('aggregateTrackingEvents', () => {
     it('should aggregate all tracking events from ads', async () => {
       mockFetch.mockResolvedValue({
