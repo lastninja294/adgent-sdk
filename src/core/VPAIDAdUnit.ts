@@ -354,7 +354,16 @@ export class VPAIDAdUnit {
 
     const src = this.escapeAttr(this.mediaFile.url);
 
-    iframe.srcdoc = `<!doctype html><html><head><style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000;}#vpaid-slot{width:100%;height:100%;position:relative;}#vpaid-video{width:100%;height:100%;}</style></head><body><div id="vpaid-slot"><video id="vpaid-video" ${videoAttrString} crossorigin="anonymous"></video></div><script src="${src}"></script></body></html>`;
+    // #vpaid-video is positioned absolute (rather than in normal flow) so it
+    // never affects layout of whatever the creative appends into #vpaid-slot
+    // alongside it. Many real-world creatives ignore the provided videoSlot
+    // and build their own <video> + container instead (permitted by the
+    // VPAID 2.0 spec); if this placeholder were left in normal flow, its
+    // own 100%-height box would push that sibling content a full slot-height
+    // down, entirely outside the visible area (clipped by body's
+    // overflow:hidden) — audio would play from the off-screen video with
+    // nothing painted on screen.
+    iframe.srcdoc = `<!doctype html><html><head><style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000;}#vpaid-slot{width:100%;height:100%;position:relative;}#vpaid-video{width:100%;height:100%;position:absolute;top:0;left:0;}</style></head><body><div id="vpaid-slot"><video id="vpaid-video" ${videoAttrString} crossorigin="anonymous"></video></div><script src="${src}"></script></body></html>`;
 
     return iframe;
   }
