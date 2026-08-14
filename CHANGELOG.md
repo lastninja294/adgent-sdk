@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-14
+
+### Fixed
+
+- **VPAIDAdUnit**: the unused bootstrap `videoSlot` placeholder inside the friendly iframe was left in normal document flow. Creatives that build their own `<video>`/container instead of reusing the provided `videoSlot` (spec-legal, and common in the wild) had that content pushed a full slot-height below the visible area, clipped by `overflow: hidden` — the ad would play (audio audible) entirely off-screen. The placeholder is now `position: absolute` so it no longer affects sibling layout.
+
 ## [0.1.0] - 2026-01-13
 
 ### Added

@@ -430,8 +430,8 @@ The SDK's selection algorithm actively prioritizes streams matching these criter
 
 | Metric | Value |
 |--------|-------|
-| Gzipped Size | 16.6 KB (`dist/adgent-sdk.umd.js`, incl. VPAID support) |
-| Minified Size | ~57 KB |
+| Gzipped Size | 16.79 KB (`dist/adgent-sdk.umd.js`, incl. VPAID support) |
+| Minified Size | ~58.6 KB |
 | Dependencies | 1 (`fast-xml-parser`) |
 
 VPAID support ships in the same single bundle rather than a separate lazy chunk — the TV distribution format (UMD, `<script>` tag) has no async-chunk runtime, so code-splitting it out wouldn't help the platforms with the tightest size constraints. Re-run `npm run build` after future changes to keep this number current.
